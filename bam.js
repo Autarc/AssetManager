@@ -1,13 +1,12 @@
 (function(){
 
-	var AssetManager = ( function(){
+	var AssetManager = (function(){
 
 		function AssetManager ( assets, storage ) {
 
 			this.storage = storage || false;
 
 			this.requests = [];
-			this.readers = [];
 
 			this.assets = {};
 
@@ -73,6 +72,17 @@
 
 			return true;
 		};
+
+
+		/* ToDo: connecting via indexedDB */
+
+		AssetManager.prototype.useStorage = function ( url ) {
+
+			var storage = localStorage[url];
+
+			return storage;
+		};
+
 
 
 		AssetManager.prototype.clear = function() {
@@ -143,7 +153,6 @@
 		};
 
 
-		// as used for filereaders
 		AssetManager.prototype._getPool = function ( type ) {
 
 			var instance;
@@ -151,10 +160,6 @@
 			if ( type === XMLHttpRequest && this.requests.length ) {
 
 				instance = this.requests.pop();
-
-			} else if ( type === FileReader && this.readers.length ) {
-
-				instance = this.readers.pop();
 
 			} else {
 
@@ -170,22 +175,9 @@
 			if ( obj instanceof XMLHttpRequest ) {
 
 				this.requests.push( obj );
-
-			} else if ( obj instanceof FileReader ) {
-
-				this.readers.push( obj );
 			}
 		};
 
-
-		/* ToDo: connecting via indexedDB */
-
-		AssetManager.prototype.useStorage = function ( url ) {
-
-			var storage = localStorage[url];
-
-			return storage;
-		};
 
 
 
@@ -214,7 +206,7 @@
 
 					if ( this.supportBlob ) {
 
-						this.read( url, response );
+						this._loaded( url, response );
 
 					} else {
 
@@ -250,7 +242,7 @@
 
 			var view = new DataView( data ),
 
-				type = this.getType( url ),
+				type = getType( url ),
 
 				format = url.substr( url.lastIndexOf('.') +1 ).toLowerCase(),
 
@@ -265,45 +257,14 @@
 				blob = ( new BlobBuilder() ).append([ view ]).getBlob( type + '/' + format );
 			}
 
-			this.read( url, blob );
+			this._loaded( url, blob );
 		};
 
 
 
-		AssetManager.prototype.read = function ( url, blob ) { // read blobs to base64
+		AssetManager.prototype._loaded = function ( url, blob ) {
 
-			var reader = this._getPool( FileReader );
-
-
-			reader.onload = function ( e ) {
-
-				var result = e.currentTarget.result;
-
-				this._loaded( url, result );
-
-			}.bind(this);
-
-
-			reader.onerror = function ( err ) {
-
-				this._error( url, err.currentTarget.error.code, err);
-
-			}.bind(this);
-
-			reader.onprogress = function ( e ) {
-
-				this._progress( url, e );
-
-			}.bind(this);
-
-
-			reader.readAsDataURL( blob );
-
-			// console.log( URL.createObjectURL( blob ) ); // => blob / objectURL for indexedDB
-		};
-
-
-		AssetManager.prototype._loaded = function ( url, data ) {
+			var data = URL.createObjectURL( blob );
 
 			refs = this.refs[url];
 
@@ -315,14 +276,16 @@
 
 			if ( ! --this.length ) {
 
-				this._emit('load', this );
+				// if ( ) -> restrict channel -> just as registered
+
+				_emit('load', this );
 			}
 		};
 
 
 		AssetManager.prototype._error = function ( src, code, e ) {
 
-			this._emit('error', { src: src, code: code, e: e });
+			_emit('error', { src: src, code: code, e: e });
 		};
 
 
@@ -343,10 +306,9 @@
 					this._finished = true;
 
 					this.requests.length = 0;
-					this.readers.length = 0;
 				}
 
-				this._emit('progress', { src: src, progress: this.total	});
+				_emit('progress', { src: src, progress: this.total	});
 			}
 		};
 
@@ -387,18 +349,29 @@
 
 		AssetManager.prototype.unset = function ( type, key ) {
 
-			if ( !key ) {	delete this.assets[type];	}
-			else		{	delete this[type][key];		}
+			if ( !key ) {
 
-			if ( localStorage[key] ) delete localStorage[key];
+				URL.revokeObjectURL( type );
 
-			// URL.revokeObjectURL( data); // => revoke oblob/bjectURL for indexedDB
+				if ( localStorage[type] ) delete localStorage[type];
+
+				delete this.assets[type];
+			}
+
+			else {
+
+				URL.revokeObjectURL( this[type][key] );
+
+				if ( localStorage[ this[type][key] ] ) delete localStorage[ this[type][key] ];
+
+				delete this[type][key];
+			}
 		};
 
 
 
 
-		/* retrieve media */
+		/* retrieve media , ToDo: callback ? pool ? */
 		AssetManager.prototype.get = function ( type, key ) {
 
 			var src = ( !key ) ? this.assets[type] : this[type][key],
@@ -422,7 +395,7 @@
 			// isn't defined yet
 			if ( !src ) return null;
 
-			if ( !key ) type = this.getType( type );
+			if ( !key ) type = getType( type );
 
 
 			container = container[type];
@@ -434,15 +407,14 @@
 
 
 
-		var channels = {
+		var channels = { // length: 1
 
 			load: [],
 			error: [],
 			progress: []
 		};
 
-
-		AssetManager.prototype.getType = function ( url ) {
+		function getType ( url ) {
 
 			url = url.substr( url.lastIndexOf('.') +1 ).toLowerCase();
 
@@ -464,22 +436,16 @@
 			}
 
 			return url;
-		};
+		}
 
-		AssetManager.prototype._emit = function ( type ) {
+		function _emit( type ) {
 
-			var subscribers = channels[ type ];
+			var subscriber = channels[ type ],
 
-			if ( subscribers ) {
+				args = Array.prototype.slice.call( arguments, 1 );
 
-				var args = Array.prototype.slice.call( arguments, 1 );
-
-				for ( var i = 0, l = subscribers.length; i < l; i++ ) {
-
-					subscribers[i][0].apply( subscribers[0][1], args || [] );
-				}
-			}
-		};
+			subscriber[0][0].apply( subscriber[0][1], args || [] );
+		}
 
 
 		AssetManager.prototype.on = function ( type, callback, context ) {
@@ -490,7 +456,7 @@
 
 			} else {
 
-				channels[ type ].push( [ callback, context ] );
+				channels[ type ][0] = [ callback, context ];
 			}
 
 		};

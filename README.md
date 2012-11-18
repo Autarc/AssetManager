@@ -1,5 +1,5 @@
-BAM - a Binary AssetManager
-===========================
+AssetManager
+============
 
 Handling binary assets like images, audio files or movies in large applications can be annoying.
 
